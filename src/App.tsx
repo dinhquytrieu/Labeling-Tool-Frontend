@@ -19,18 +19,51 @@ export interface Annotation {
 
 function App() {
   const [image, setImage] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageFilename, setImageFilename] = useState<string>('');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      setImageFilename(file.name);
+    if (!file) return;
+
+    setImageFilename(file.name);
+    setImageUrl(null); // Clear previous URL
+    setAnnotations([]); // Clear previous annotations
+    setSelectedId(null); // Clear selection
+    setIsUploading(true);
+    
+    try {
+      // Create local preview
       const reader = new FileReader();
       reader.onload = (ev) => setImage(ev.target?.result as string);
       reader.readAsDataURL(file);
+
+      // Upload to backend
+      const formData = new FormData();
+      formData.append('image', file);
+
+      const uploadRes = await fetch('http://localhost:3001/annotate/upload', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (uploadRes.ok) {
+        const uploadData = await uploadRes.json();
+        setImageUrl(uploadData.url);
+        console.log('Image uploaded:', uploadData.url);
+      } else {
+        const error = await uploadRes.text();
+        alert(`Upload failed: ${error}`);
+      }
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert(`Upload error: ${error}`);
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -49,13 +82,16 @@ function App() {
   };
 
   const handlePredict = async () => {
-    if (!image) return;
+    if (!imageUrl) {
+      alert('Please wait for image upload to complete before predicting');
+      return;
+    }
     setIsLoading(true);
     try {
       const res = await fetch('http://localhost:3001/annotate/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image }),
+        body: JSON.stringify({ imageUrl }),
       });
       if (res.ok) {
         const data = await res.json();
@@ -82,7 +118,16 @@ function App() {
   return (
     <div className="App">
       <h1>UI Annotation Tool</h1>
-      <input type="file" accept="image/png, image/jpeg" onChange={handleImageUpload} />
+      <div style={{ margin: '16px' }}>
+        <input 
+          type="file" 
+          accept="image/png, image/jpeg, image/webp" 
+          onChange={handleImageUpload}
+          disabled={isUploading}
+        />
+        {isUploading && <span style={{ marginLeft: '8px', color: '#007acc' }}>Uploading...</span>}
+        {imageUrl && <span style={{ marginLeft: '8px', color: '#4caf50' }}>✓ Uploaded</span>}
+      </div>
       {image && (
         <>
           <AnnotationCanvas
@@ -101,8 +146,11 @@ function App() {
             }}
           />
           <div style={{ margin: '16px' }}>
-            <button onClick={handlePredict} disabled={isLoading}>
-              {isLoading ? 'Predicting...' : 'Predict (LLM Auto-Tag)'}
+            <button 
+              onClick={handlePredict} 
+              disabled={isLoading || isUploading || !imageUrl}
+            >
+              {isLoading ? 'Predicting...' : isUploading ? 'Upload in progress...' : !imageUrl ? 'Upload image first' : 'Predict (LLM Auto-Tag)'}
             </button>
             <button onClick={handleDownload} style={{ marginLeft: 8 }}>Download JSON</button>
           </div>
