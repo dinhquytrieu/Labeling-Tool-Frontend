@@ -1,5 +1,7 @@
-import React, { useRef, useState, useCallback } from 'react';
-import { Stage, Layer, Rect, Image as KonvaImage } from 'react-konva';
+import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
+import { Stage, Layer, Rect, Image as KonvaImage, Transformer } from 'react-konva';
+import { KonvaEventObject } from 'konva/lib/Node';
+import { Vector2d } from 'konva/lib/types';
 // @ts-ignore: use-image has no types
 import useImage from 'use-image';
 import { Annotation, Tag } from '../App';
@@ -13,178 +15,333 @@ interface Props {
   tags: readonly Tag[];
 }
 
+interface DrawingState {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 const MAX_WIDTH = 900; // px, adjust as needed
 const MAX_HEIGHT = 700; // px, adjust as needed
+const MIN_BOX_SIZE = 10; // minimum size for a valid bounding box
 
-const getScaledDimensions = (img: HTMLImageElement | undefined) => {
+const getDimensions = (img: HTMLImageElement | undefined) => {
   if (!img) return { width: MAX_WIDTH, height: MAX_HEIGHT };
-  const ratio = Math.min(MAX_WIDTH / img.width, MAX_HEIGHT / img.height, 1);
   return {
-    width: Math.round(img.width * ratio),
-    height: Math.round(img.height * ratio),
-    scale: ratio,
+    width: img.width,
+    height: img.height,
   };
 };
 
-const AnnotationCanvas: React.FC<Props> = ({ image, annotations, setAnnotations, selectedId, setSelectedId, tags }) => {
-  const [img] = useImage(image);
-  const [drawing, setDrawing] = useState(false);
-  const [newRect, setNewRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const stageRef = useRef<any>(null);
+const constrainToImageBounds = (
+  rect: DrawingState,
+  imageWidth: number,
+  imageHeight: number
+): DrawingState => {
+  const x = Math.max(0, Math.min(rect.x, imageWidth - rect.width));
+  const y = Math.max(0, Math.min(rect.y, imageHeight - rect.height));
+  const width = Math.min(rect.width, imageWidth - x);
+  const height = Math.min(rect.height, imageHeight - y);
+  
+  return { x, y, width, height };
+};
 
-  const handleMouseDown = (e: any) => {
-    if (drawing) return;
+const AnnotationCanvas: React.FC<Props> = ({ 
+  image, 
+  annotations, 
+  setAnnotations, 
+  selectedId, 
+  setSelectedId, 
+  tags 
+}) => {
+  const [img] = useImage(image);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [newRect, setNewRect] = useState<DrawingState | null>(null);
+  const [cursor, setCursor] = useState<string>('crosshair');
+  
+  const stageRef = useRef<any>(null);
+  const transformerRef = useRef<any>(null);
+
+  // Memoize dimensions without scaling
+  const dimensions = useMemo(() => getDimensions(img), [img]);
+
+  // Update transformer when selection changes
+  useEffect(() => {
+    if (transformerRef.current && selectedId) {
+      const stage = stageRef.current;
+      const selectedNode = stage.findOne(`#${selectedId}`);
+      if (selectedNode) {
+        transformerRef.current.nodes([selectedNode]);
+        transformerRef.current.getLayer().batchDraw();
+      }
+    } else if (transformerRef.current) {
+      transformerRef.current.nodes([]);
+      transformerRef.current.getLayer().batchDraw();
+    }
+  }, [selectedId]);
+
+  const getPointerPosition = useCallback((e: KonvaEventObject<MouseEvent | TouchEvent>): Vector2d => {
+    const stage = e.target.getStage();
+    return stage?.getPointerPosition() || { x: 0, y: 0 };
+  }, []);
+
+  const handleMouseDown = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    if (isDrawing) return;
     
     // Allow drawing on stage or image, but not on annotation rectangles
-    const clickedOnAnnotation = e.target.className === 'Rect';
+    const clickedOnAnnotation = e.target.className === 'Rect' && e.target.id() !== 'background';
     
     if (!clickedOnAnnotation) {
-      const stage = e.target.getStage();
-      const pointerPosition = stage.getPointerPosition();
-      const { x, y } = pointerPosition;
+      const { x, y } = getPointerPosition(e);
       setNewRect({ x, y, width: 0, height: 0 });
-      setDrawing(true);
+      setIsDrawing(true);
       setSelectedId(null);
+      setCursor('crosshair');
     }
-  };
+  }, [isDrawing, getPointerPosition, setSelectedId]);
 
-  const handleMouseMove = (e: any) => {
-    if (!drawing || !newRect) return;
-    const stage = e.target.getStage();
-    const pointerPosition = stage.getPointerPosition();
-    const { x, y } = pointerPosition;
-    setNewRect({
-      ...newRect,
-      width: x - newRect.x,
-      height: y - newRect.y,
-    });
-  };
+  const handleMouseMove = useCallback((e: KonvaEventObject<MouseEvent>) => {
+    if (!isDrawing || !newRect) return;
+    
+    const { x, y } = getPointerPosition(e);
+    setNewRect(prev => prev ? {
+      ...prev,
+      width: x - prev.x,
+      height: y - prev.y,
+    } : null);
+  }, [isDrawing, newRect, getPointerPosition]);
 
-  const handleMouseUp = () => {
-    if (drawing && newRect && Math.abs(newRect.width) > 10 && Math.abs(newRect.height) > 10) {
-      const finalRect = {
+  const handleMouseUp = useCallback(() => {
+    if (!isDrawing || !newRect || !img) {
+      setIsDrawing(false);
+      setNewRect(null);
+      return;
+    }
+
+    // Only create annotation if box is large enough
+    if (Math.abs(newRect.width) > MIN_BOX_SIZE && Math.abs(newRect.height) > MIN_BOX_SIZE) {
+      const normalizedRect = {
         x: Math.min(newRect.x, newRect.x + newRect.width),
         y: Math.min(newRect.y, newRect.y + newRect.height),
         width: Math.abs(newRect.width),
         height: Math.abs(newRect.height),
       };
       
-      // Ensure box stays within image bounds
-      if (img) {
-        finalRect.x = Math.max(0, Math.min(finalRect.x, img.width - finalRect.width));
-        finalRect.y = Math.max(0, Math.min(finalRect.y, img.height - finalRect.height));
-        finalRect.width = Math.min(finalRect.width, img.width - finalRect.x);
-        finalRect.height = Math.min(finalRect.height, img.height - finalRect.y);
-      }
+      // Constrain to image bounds
+      const constrainedRect = constrainToImageBounds(normalizedRect, img.width, img.height);
       
-      setAnnotations([
-        ...annotations,
-        {
-          ...finalRect,
-          tag: tags[0],
-          id: 'manual-' + Date.now() + '-' + Math.random().toString(36).slice(2),
-          source: 'manual',
-        },
-      ]);
+      const newAnnotation: Annotation = {
+        ...constrainedRect,
+        tag: tags[0],
+        id: `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        source: 'manual',
+      };
+      
+      setAnnotations([...annotations, newAnnotation]);
+      setSelectedId(newAnnotation.id);
     }
-    setDrawing(false);
+    
+    setIsDrawing(false);
     setNewRect(null);
-  };
+    setCursor('crosshair');
+  }, [isDrawing, newRect, img, annotations, setAnnotations, setSelectedId, tags]);
 
-  const handleRectClick = (id: string) => {
-    setSelectedId(id);
-  };
+  const handleRectClick = useCallback((e: any, id: string) => {
+    e.cancelBubble = true;
+    setSelectedId(selectedId === id ? null : id);
+  }, [selectedId, setSelectedId]);
 
   const handleDelete = useCallback((id: string) => {
     setAnnotations(annotations.filter(a => a.id !== id));
     setSelectedId(null);
   }, [annotations, setAnnotations, setSelectedId]);
 
-  // Keyboard delete
-  React.useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selectedId) {
-        handleDelete(selectedId);
+  const handleDragMove = useCallback((id: string, e: KonvaEventObject<DragEvent>) => {
+    const node = e.target;
+    const newPos = { x: node.x(), y: node.y() };
+    
+    // Constrain position to image bounds
+    if (img) {
+      const annotation = annotations.find(a => a.id === id);
+      if (annotation) {
+        newPos.x = Math.max(0, Math.min(newPos.x, img.width - annotation.width));
+        newPos.y = Math.max(0, Math.min(newPos.y, img.height - annotation.height));
+        node.position(newPos);
       }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedId, annotations, handleDelete]);
+    }
+    
+    setAnnotations(annotations.map(a => 
+      a.id === id ? { ...a, x: newPos.x, y: newPos.y } : a
+    ));
+  }, [annotations, setAnnotations, img]);
 
-  // Drag and resize handlers
-  const handleDragMove = (id: string, e: any) => {
-    setAnnotations(annotations.map(a => a.id === id ? { ...a, x: e.target.x(), y: e.target.y() } : a));
-  };
-
-  const handleTransform = (id: string, e: any) => {
+  const handleTransform = useCallback((id: string, e: any) => {
     const node = e.target;
     const scaleX = node.scaleX();
     const scaleY = node.scaleY();
+    
+    const newAttrs = {
+      x: node.x(),
+      y: node.y(),
+      width: Math.max(MIN_BOX_SIZE, node.width() * scaleX),
+      height: Math.max(MIN_BOX_SIZE, node.height() * scaleY),
+    };
+    
+    // Constrain to image bounds
+    if (img) {
+      const constrained = constrainToImageBounds(newAttrs, img.width, img.height);
+      node.position({ x: constrained.x, y: constrained.y });
+      node.size({ width: constrained.width, height: constrained.height });
+    }
+    
     setAnnotations(annotations.map(a =>
-      a.id === id
-        ? {
-            ...a,
-            x: node.x(),
-            y: node.y(),
-            width: Math.max(10, node.width() * scaleX),
-            height: Math.max(10, node.height() * scaleY),
-          }
-        : a
+      a.id === id ? { ...a, ...newAttrs } : a
     ));
+    
+    // Reset scale to 1 to avoid compound scaling
     node.scaleX(1);
     node.scaleY(1);
-  };
+  }, [annotations, setAnnotations, img]);
 
-  const dims = getScaledDimensions(img);
+  // Keyboard event handling
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' && selectedId) {
+        e.preventDefault();
+        handleDelete(selectedId);
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        setSelectedId(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedId, handleDelete, setSelectedId]);
+
+  // Mouse enter/leave for cursor changes
+  const handleMouseEnter = useCallback(() => {
+    setCursor('crosshair');
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    setCursor('default');
+    if (isDrawing) {
+      handleMouseUp();
+    }
+  }, [isDrawing, handleMouseUp]);
+
+  const renderAnnotations = useMemo(() => {
+    return annotations.map((a) => (
+      <Rect
+        key={a.id}
+        id={a.id}
+        x={a.x}
+        y={a.y}
+        width={a.width}
+        height={a.height}
+        stroke={a.source === 'llm' ? '#e57300' : '#1976d2'}
+        strokeWidth={selectedId === a.id ? 3 : 2}
+        dash={a.source === 'llm' ? [8, 4] : undefined}
+        draggable
+        onClick={(e) => handleRectClick(e, a.id)}
+        onTap={(e) => handleRectClick(e, a.id)}
+        onDragMove={(e) => handleDragMove(a.id, e)}
+        onTransformEnd={(e: any) => handleTransform(a.id, e)}
+        onDblClick={() => handleDelete(a.id)}
+        onDblTap={() => handleDelete(a.id)}
+        listening={true}
+        // Accessibility
+        name="annotation"
+        perfectDrawEnabled={false}
+      />
+    ));
+  }, [annotations, selectedId, handleRectClick, handleDragMove, handleTransform, handleDelete]);
+
+  const renderDrawingRect = useMemo(() => {
+    if (!isDrawing || !newRect) return null;
+    
+    return (
+      <Rect
+        x={newRect.x}
+        y={newRect.y}
+        width={newRect.width}
+        height={newRect.height}
+        stroke="#43a047"
+        strokeWidth={2}
+        dash={[4, 4]}
+        listening={false}
+        name="drawing-rect"
+      />
+    );
+  }, [isDrawing, newRect]);
 
   return (
-    <div className="annotation-canvas-container" style={{ maxWidth: MAX_WIDTH, maxHeight: MAX_HEIGHT, overflow: 'auto', margin: '0 auto' }}>
+    <div 
+      className="annotation-canvas-container" 
+      style={{ 
+        maxWidth: MAX_WIDTH, 
+        maxHeight: MAX_HEIGHT, 
+        overflow: 'auto', 
+        margin: '0 auto',
+        cursor,
+        userSelect: 'none'
+      }}
+      role="application"
+      aria-label="Image annotation canvas"
+      tabIndex={0}
+    >
       <Stage
-        width={dims.width}
-        height={dims.height}
+        width={dimensions.width}
+        height={dimensions.height}
         ref={stageRef}
-        scaleX={dims.scale}
-        scaleY={dims.scale}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        style={{ border: '1px solid #ccc', background: '#fff', display: 'block' }}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        style={{ 
+          border: '1px solid #ccc', 
+          background: '#fff', 
+          display: 'block',
+          outline: 'none'
+        }}
       >
         <Layer>
-          {img && <KonvaImage image={img} />}
-          {annotations.map((a) => (
-            <Rect
-              key={a.id}
-              x={a.x}
-              y={a.y}
-              width={a.width}
-              height={a.height}
-              stroke={a.source === 'llm' ? '#e57300' : '#1976d2'}
-              strokeWidth={selectedId === a.id ? 3 : 2}
-              dash={a.source === 'llm' ? [8, 4] : undefined}
-              draggable
-              onClick={() => handleRectClick(a.id)}
-              onTap={() => handleRectClick(a.id)}
-              onDragMove={e => handleDragMove(a.id, e)}
-              onTransformEnd={e => handleTransform(a.id, e)}
-              onDblClick={() => handleDelete(a.id)}
-              onDblTap={() => handleDelete(a.id)}
-              listening={true}
+          {img && (
+            <KonvaImage 
+              image={img} 
+              id="background"
+              listening={false}
             />
-          ))}
-          {drawing && newRect && (
-            <Rect
-              x={newRect.x}
-              y={newRect.y}
-              width={newRect.width}
-              height={newRect.height}
-              stroke="#43a047"
-              strokeWidth={2}
-              dash={[4, 4]}
+          )}
+          {renderAnnotations}
+          {renderDrawingRect}
+          {selectedId && (
+            <Transformer
+              ref={transformerRef}
+              boundBoxFunc={(oldBox, newBox) => {
+                // Constrain transformer to minimum size
+                if (newBox.width < MIN_BOX_SIZE || newBox.height < MIN_BOX_SIZE) {
+                  return oldBox;
+                }
+                return newBox;
+              }}
+              rotateEnabled={false}
             />
           )}
         </Layer>
       </Stage>
+      
+      {/* Screen reader instructions */}
+      <div className="sr-only" aria-live="polite">
+        {selectedId ? 
+          `Annotation selected. Press Delete to remove, Escape to deselect.` : 
+          'Click and drag to create new annotation. Click existing annotations to select them.'
+        }
+      </div>
     </div>
   );
 };
