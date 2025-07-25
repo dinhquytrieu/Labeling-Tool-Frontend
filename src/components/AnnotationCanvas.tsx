@@ -320,8 +320,8 @@ const AnnotationCanvas: React.FC<Props> = ({
               strokeWidth={selectedId === a.id ? 3 : 2}
               dash={a.source === 'llm' ? [8, 4] : undefined}
               draggable
-              onClick={() => handleRectClick(a.id)}
-              onTap={() => handleRectClick(a.id)}
+              onClick={(e) => handleRectClick(e, a.id)}
+              onTap={(e) => handleRectClick(e, a.id)}
               onDragMove={e => handleDragMove(a.id, e)}
               onTransformEnd={e => handleTransform(a.id, e)}
               onDblClick={() => handleDelete(a.id)}
@@ -329,7 +329,7 @@ const AnnotationCanvas: React.FC<Props> = ({
               listening={true}
             />
           ))}
-          {drawing && newRect && (
+          {isDrawing && newRect && (
             <Rect
               x={newRect.x}
               y={newRect.y}
