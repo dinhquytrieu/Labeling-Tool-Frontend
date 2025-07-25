@@ -300,36 +300,44 @@ const AnnotationCanvas: React.FC<Props> = ({
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
-        onMouseEnter={handleMouseEnter}
-        onMouseLeave={handleMouseLeave}
         style={{ 
-          border: '1px solid #ccc', 
+          border: '1px solid var(--gray-200)', 
           background: '#fff', 
           display: 'block',
-          outline: 'none'
+          borderRadius: 'var(--radius-xl)'
         }}
       >
         <Layer>
-          {img && (
-            <KonvaImage 
-              image={img} 
-              id="background"
-              listening={false}
+          {img && <KonvaImage image={img} />}
+          {annotations.map((a) => (
+            <Rect
+              key={a.id}
+              x={a.x}
+              y={a.y}
+              width={a.width}
+              height={a.height}
+              stroke={a.source === 'llm' ? '#ea580c' : '#2563eb'}
+              strokeWidth={selectedId === a.id ? 3 : 2}
+              dash={a.source === 'llm' ? [8, 4] : undefined}
+              draggable
+              onClick={() => handleRectClick(a.id)}
+              onTap={() => handleRectClick(a.id)}
+              onDragMove={e => handleDragMove(a.id, e)}
+              onTransformEnd={e => handleTransform(a.id, e)}
+              onDblClick={() => handleDelete(a.id)}
+              onDblTap={() => handleDelete(a.id)}
+              listening={true}
             />
-          )}
-          {renderAnnotations}
-          {renderDrawingRect}
-          {selectedId && (
-            <Transformer
-              ref={transformerRef}
-              boundBoxFunc={(oldBox, newBox) => {
-                // Constrain transformer to minimum size
-                if (newBox.width < MIN_BOX_SIZE || newBox.height < MIN_BOX_SIZE) {
-                  return oldBox;
-                }
-                return newBox;
-              }}
-              rotateEnabled={false}
+          ))}
+          {drawing && newRect && (
+            <Rect
+              x={newRect.x}
+              y={newRect.y}
+              width={newRect.width}
+              height={newRect.height}
+              stroke="#059669"
+              strokeWidth={2}
+              dash={[4, 4]}
             />
           )}
         </Layer>
