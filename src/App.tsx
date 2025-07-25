@@ -186,32 +186,15 @@ function App() {
                 setSelectedId={setSelectedId}
                 tags={TAGS}
               />
-              {/* Annotation Stats */}
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'center', 
-                gap: 'var(--space-6)', 
-                marginTop: 'var(--space-4)',
-                fontSize: 'var(--font-size-sm)',
-                color: 'var(--gray-600)'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <div style={{ 
-                    width: '12px', 
-                    height: '12px', 
-                    border: '2px solid var(--primary-blue)', 
-                    borderRadius: 'var(--radius-sm)' 
-                  }}></div>
-                  Manual: {manualCount}
+              {/* Enhanced Annotation Stats */}
+              <div className="annotation-stats">
+                <div className="stat-item stat-manual">
+                  <div className="stat-indicator"></div>
+                  <span>Manual: {manualCount}</span>
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                  <div style={{ 
-                    width: '12px', 
-                    height: '12px', 
-                    border: '2px dashed var(--accent-orange)', 
-                    borderRadius: 'var(--radius-sm)' 
-                  }}></div>
-                  AI Generated: {aiCount}
+                <div className="stat-item stat-ai">
+                  <div className="stat-indicator"></div>
+                  <span>AI Generated: {aiCount}</span>
                 </div>
               </div>
             </div>
