@@ -67,18 +67,65 @@ function App() {
     }
   };
 
-  const handleDownload = () => {
+  const handleDownloadGroundTruth = () => {
+    const manualAnnotations = annotations.filter(a => a.source === 'manual');
+    if (manualAnnotations.length === 0) {
+      alert('No manual annotations to export as ground truth');
+      return;
+    }
+    
     const exportData = {
       image_filename: imageFilename,
-      annotations: annotations.map(({ x, y, width, height, tag }) => ({ x, y, width, height, tag })),
+      annotations: manualAnnotations.map(({ x, y, width, height, tag }) => ({ x, y, width, height, tag })),
     };
     const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = imageFilename.replace(/\.[^.]+$/, '') + '-annotations.json';
+    a.download = 'ground-truth-jsons/' + imageFilename.replace(/\.[^.]+$/, '') + '-annotations.json';
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadPredicted = () => {
+    const aiAnnotations = annotations.filter(a => a.source === 'llm');
+    if (aiAnnotations.length === 0) {
+      alert('No AI predictions to export');
+      return;
+    }
+    
+    const exportData = {
+      image_filename: imageFilename,
+      annotations: aiAnnotations.map(({ x, y, width, height, tag }) => ({ x, y, width, height, tag })),
+    };
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'predicted-jsons/' + imageFilename.replace(/\.[^.]+$/, '') + '-annotations.json';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownload = () => {
+    // Export both types if both exist
+    const manualAnnotations = annotations.filter(a => a.source === 'manual');
+    const aiAnnotations = annotations.filter(a => a.source === 'llm');
+    
+    if (manualAnnotations.length > 0) {
+      handleDownloadGroundTruth();
+    }
+    
+    if (aiAnnotations.length > 0) {
+      // Small delay to prevent browser blocking multiple downloads
+      setTimeout(() => {
+        handleDownloadPredicted();
+      }, 100);
+    }
+    
+    if (manualAnnotations.length === 0 && aiAnnotations.length === 0) {
+      alert('No annotations to export');
+    }
   };
 
   const handlePredict = async () => {
@@ -175,34 +222,8 @@ function App() {
         </div>
       ) : (
         <div className="main-content">
-          {/* Canvas Section */}
-          <div className="canvas-section">
-            <div className="canvas-container">
-              <AnnotationCanvas
-                image={image}
-                annotations={annotations}
-                setAnnotations={setAnnotations}
-                selectedId={selectedId}
-                setSelectedId={setSelectedId}
-                tags={TAGS}
-              />
-              {/* Enhanced Annotation Stats */}
-              <div className="annotation-stats">
-                <div className="stat-item stat-manual">
-                  <div className="stat-indicator"></div>
-                  <span>Manual: {manualCount}</span>
-                </div>
-                <div className="stat-item stat-ai">
-                  <div className="stat-indicator"></div>
-                  <span>AI Generated: {aiCount}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Controls Panel */}
-          <div className="controls-panel">
-            {/* Upload New Image */}
+          {/* Left Panel - Upload Section */}
+          <div className="left-panel">
             <div className="upload-card">
               <div className="upload-section">
                 <h3 className="upload-title">Change Image</h3>
@@ -234,7 +255,35 @@ function App() {
                 )}
               </div>
             </div>
+          </div>
 
+          {/* Canvas Section */}
+          <div className="canvas-section">
+            <div className="canvas-container">
+              <AnnotationCanvas
+                image={image}
+                annotations={annotations}
+                setAnnotations={setAnnotations}
+                selectedId={selectedId}
+                setSelectedId={setSelectedId}
+                tags={TAGS}
+              />
+              {/* Enhanced Annotation Stats */}
+              <div className="annotation-stats">
+                <div className="stat-item stat-manual">
+                  <div className="stat-indicator"></div>
+                  <span>Manual: {manualCount}</span>
+                </div>
+                <div className="stat-item stat-ai">
+                  <div className="stat-indicator"></div>
+                  <span>AI Generated: {aiCount}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Controls Panel */}
+          <div className="controls-panel">
             {/* Actions */}
             <div className="actions-card">
               <h3 className="actions-title">Actions</h3>
@@ -248,13 +297,38 @@ function App() {
                   {!isLoading && <span>🤖</span>}
                   {getButtonText()}
                 </button>
+              </div>
+              
+              <h4 style={{ marginTop: 'var(--space-6)', marginBottom: 'var(--space-4)', fontSize: 'var(--font-size-sm)', fontWeight: 600, color: 'var(--gray-700)' }}>
+                Export Options
+              </h4>
+              <div className="action-buttons">
+                <button 
+                  onClick={handleDownloadGroundTruth} 
+                  className="btn btn-success"
+                  disabled={manualCount === 0}
+                  title="Export manual annotations as ground truth"
+                >
+                  <span>📝</span>
+                  Ground Truth ({manualCount})
+                </button>
+                <button 
+                  onClick={handleDownloadPredicted} 
+                  className="btn btn-success"
+                  disabled={aiCount === 0}
+                  title="Export AI predictions"
+                >
+                  <span>🤖</span>
+                  Predictions ({aiCount})
+                </button>
                 <button 
                   onClick={handleDownload} 
                   className="btn btn-success"
                   disabled={annotations.length === 0}
+                  title="Export both ground truth and predictions"
                 >
                   <span>💾</span>
-                  Export Annotations
+                  Export All
                 </button>
               </div>
             </div>
@@ -269,19 +343,6 @@ function App() {
                 }}
               />
             )}
-
-            {/* Instructions */}
-            <div className="instructions-card">
-              <h3 className="instructions-title">How to Use</h3>
-              <ul className="instructions-list">
-                <li>Click and drag to draw bounding boxes</li>
-                <li>Click boxes to select and change tags</li>
-                <li>Double-click boxes to delete them</li>
-                <li>Press Delete key to remove selected box</li>
-                <li>Use "Generate AI Annotations" for automatic detection</li>
-                <li>Manual annotations (blue solid) and AI annotations (orange dashed)</li>
-              </ul>
-            </div>
           </div>
         </div>
       )}

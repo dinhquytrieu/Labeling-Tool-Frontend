@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useMemo, useEffect } from 'react';
-import { Stage, Layer, Rect, Image as KonvaImage, Transformer } from 'react-konva';
+import { Stage, Layer, Rect, Image as KonvaImage, Transformer, Text } from 'react-konva';
 import { KonvaEventObject } from 'konva/lib/Node';
 import { Vector2d } from 'konva/lib/types';
 // @ts-ignore: use-image has no types
@@ -325,6 +325,28 @@ const AnnotationCanvas: React.FC<Props> = ({
     ));
   }, [annotations, selectedId, hoveredId, handleRectClick, handleRectHover, handleRectLeave, handleDragMove, handleTransform, handleDelete]);
 
+  const renderAnnotationTexts = useMemo(() => {
+    return annotations.map((a) => (
+      <Text
+        key={`text-${a.id}`}
+        x={a.x + 4} // Small padding from left edge
+        y={a.y + 4} // Small padding from top edge
+        text={a.tag}
+        fontSize={12}
+        fontFamily="system-ui, -apple-system, sans-serif"
+        fontStyle="bold"
+        fill="white"
+        stroke={a.source === 'llm' ? '#ea580c' : '#2563eb'}
+        strokeWidth={1}
+        shadowColor="rgba(0,0,0,0.5)"
+        shadowBlur={3}
+        shadowOffset={{ x: 1, y: 1 }}
+        listening={false} // Don't interfere with annotation interactions
+        perfectDrawEnabled={false}
+      />
+    ));
+  }, [annotations]);
+
   const renderDrawingRect = useMemo(() => {
     if (!isDrawing || !newRect) return null;
     
@@ -417,6 +439,7 @@ const AnnotationCanvas: React.FC<Props> = ({
           <Layer>
             {img && <KonvaImage image={img} />}
             {renderAnnotations}
+            {renderAnnotationTexts}
             {renderDrawingRect}
             {selectedId && (
               <Transformer
